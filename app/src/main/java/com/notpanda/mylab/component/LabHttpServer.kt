@@ -21,7 +21,6 @@ constructor(mainActivity: MainActivity) : NanoHTTPD(PORT) {
 
     private val imageLambda = { session: IHTTPSession ->
         val filePath = session.parameters.get("file")!![0].toString()
-        //showImage("/storage/emulated/0/Pictures/MyLab/$filePath")
         showImage(filePath)
     }
 
@@ -30,23 +29,36 @@ constructor(mainActivity: MainActivity) : NanoHTTPD(PORT) {
         newFixedLengthResponse("photo is taken: <br><hr><img width=\"480px\" src=\"/image?file=$photoFilePath\" alt=\"photo should be here\">\n")
     }
 
-    private val defaultLambda = { session: IHTTPSession ->
-        newFixedLengthResponse(readHtmlFromAssets(assets, "index.htm"))
-
+    private val webArtifactsLambda = { session: IHTTPSession ->
+        var path = Uri.parse(session.uri).path
+        readTextContentFromAssets(assets, path)
     }
 
-    private val stopPreviewLambda= { session: IHTTPSession ->
+    private val defaultLambda = { session: IHTTPSession ->
+        var path = Uri.parse(session.uri).path
+        newFixedLengthResponse(Status.NOT_FOUND, "text/html", "File Not Found : $path")
+    }
+
+    private val mainpageLambda = { session: IHTTPSession ->
+        readTextContentFromAssets(assets, "web/index.htm")
+    }
+
+    private val stopPreviewLambda = { session: IHTTPSession ->
         mainActivity.cameraFragment.stopPreview()
         newFixedLengthResponse("stopped preview")
     }
 
-    private fun readHtmlFromAssets(assets: AssetManager, filePath: String): String {
+    private fun readTextContentFromAssets(assets: AssetManager, filePath: String): Response {
+        var filePathInAsset = filePath
+        if(filePathInAsset.startsWith("/")){
+            filePathInAsset = filePathInAsset.substring(1)
+        }
+        Log.d(TAG, "readTextContentFromAssets. $filePath -> $filePathInAsset")
         val sb = StringBuffer()
         var reader: BufferedReader? = null
         try {
-            Log.d(TAG, "assets : ${assets.list("").joinToString(",")}")
             reader = BufferedReader(
-                InputStreamReader(assets.open(filePath), "UTF-8")
+                InputStreamReader(assets.open(filePathInAsset), "UTF-8")
             )
             var mLine = reader.readLine()
             Log.d(TAG, mLine)
@@ -57,6 +69,7 @@ constructor(mainActivity: MainActivity) : NanoHTTPD(PORT) {
             }
         } catch (e: IOException) {
             Log.e(TAG, e.message)
+            return newFixedLengthResponse(Status.NOT_FOUND, "text/html", "File Not Found : $filePath")
         } finally {
             if (reader != null) {
                 try {
@@ -66,7 +79,7 @@ constructor(mainActivity: MainActivity) : NanoHTTPD(PORT) {
                 }
             }
         }
-        return sb.toString()
+        return newFixedLengthResponse(sb.toString())
     }
 
     private val routeMap = mapOf(
@@ -84,6 +97,18 @@ constructor(mainActivity: MainActivity) : NanoHTTPD(PORT) {
         var uri = Uri.parse(session.uri)
         val routePath = "${session.method.toString().toUpperCase()}::${uri.path}"
         Log.d(TAG, "routePath = $routePath")
+
+        if (uri.path.equals("/")
+            || uri.path.equals("/index")
+            || uri.path.equals("/index.html")
+        ) {
+            return route(session, mainpageLambda)
+        }
+
+        if (uri.path.startsWith("/web/")) {
+            return route(session, webArtifactsLambda)
+        }
+
         if (routeMap.containsKey(routePath)) {
             return route(session, routeMap.get(routePath)!!);
         }
@@ -91,59 +116,30 @@ constructor(mainActivity: MainActivity) : NanoHTTPD(PORT) {
     }
 
     private fun route(session: IHTTPSession, handler: (session: IHTTPSession) -> Response): Response {
+        Log.i(TAG, "route request to -> ${handler.javaClass.canonicalName}")
         return handler(session)
     }
 
-    /*
-    fun test(session: IHTTPSession): Response {
-        val files = HashMap<String, String>()
-        val method = session.method
-        val uri = session.uri
-        if (Method.PUT == method || Method.POST == method) {
-            try {
-                session.parseBody(files)
-            } catch (ioe: IOException) {
-                return newFixedLengthResponse(
-                    Status.INTERNAL_ERROR,
-                    NanoHTTPD.MIME_PLAINTEXT,
-                    "SERVER INTERNAL ERROR: IOException: " + ioe.message
-                )
-            } catch (re: NanoHTTPD.ResponseException) {
-                return newFixedLengthResponse(re.status, NanoHTTPD.MIME_PLAINTEXT, re.message)
-            }
-
-        }
-        // get the POST body
-        val postBody = session.queryParameterString
-        // or you can access the POST request's parameters
-        val postParameter = session.parms["parameter"]
-        return newFixedLengthResponse(postBody) // Or postParameter.
-    }
-    */
-
-    fun showImage(filePath: String): Response {
+    private fun showImage(filePath: String): Response {
         Log.i(TAG, "image file Path =[$filePath]")
         var fis: FileInputStream? = null
         try {
-            val file = File(filePath) //path exists and its correct
+            val file = File(filePath)
             fis = FileInputStream(file)
         } catch (e: FileNotFoundException) {
             e.printStackTrace()
+            return newFixedLengthResponse(Status.NOT_FOUND, "text/html", "File Not Found : $filePath")
         }
-
-
         val res = newChunkedResponse(
             Status.OK
             , "image/jpeg", fis
         )
-        //res.addHeader("Content-Disposition", "attachment; filename=\"" + f.getName() + "\"")
         return res
     }
 
 
     companion object {
-        private val TAG = "LabHttpServer"
-        private val PORT = 8080
-
+        val TAG = this.javaClass.canonicalName
+        private const val PORT = 8080
     }
 }
