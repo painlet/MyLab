@@ -13,25 +13,37 @@ import org.nanohttpd.protocols.http.response.Response.newFixedLengthResponse
 import org.nanohttpd.protocols.http.response.Response.newChunkedResponse
 import java.io.*
 import org.nanohttpd.protocols.http.response.Status
+import java.util.*
 
 
 class LabHttpServer @Throws(IOException::class)
 constructor(mainActivity: MainActivity) : NanoHTTPD(PORT) {
+    var mMainActivity: MainActivity
+
+    init {
+        start()
+        mMainActivity = mainActivity
+        Log.i(TAG, "\nRunning! Visit home page to http://${Utils.getIPAddress()}:$PORT/ \n")
+    }
+
+
+
+
     val assets = mainActivity.assets
 
-    private val imageLambda = { session: IHTTPSession ->
+    private val showPhotoLambda = { session: IHTTPSession ->
         val filePath = session.parameters.get("file")!![0].toString()
         showImage(filePath)
     }
 
     private val shotLambda = { session: IHTTPSession ->
         val photoFilePath = mainActivity.takePhoto()
-        newFixedLengthResponse("photo is taken: <br><hr><img width=\"480px\" src=\"/image?file=$photoFilePath\" alt=\"photo should be here\">\n")
+        newFixedLengthResponse("photo is taken: <br><hr><img width=\"480px\" src=\"/photo?file=$photoFilePath\" alt=\"photo should be here\">\n")
     }
 
     private val webArtifactsLambda = { session: IHTTPSession ->
         var path = Uri.parse(session.uri).path
-        readTextContentFromAssets(assets, path)
+        readTextContentFromAssetsAsResponse(assets, path)
     }
 
     private val defaultLambda = { session: IHTTPSession ->
@@ -40,20 +52,38 @@ constructor(mainActivity: MainActivity) : NanoHTTPD(PORT) {
     }
 
     private val mainpageLambda = { session: IHTTPSession ->
-        readTextContentFromAssets(assets, "web/index.htm")
+        readTextContentFromAssetsAsResponse(assets, "web/index.htm")
     }
 
-    private val stopPreviewLambda = { session: IHTTPSession ->
-        mainActivity.cameraFragment.stopPreview()
-        newFixedLengthResponse("stopped preview")
+    private val listPhotoLambda = { session: IHTTPSession ->
+        val fileList = mainActivity.cameraFragment.getPhotoList()
+        var sb = StringBuffer()
+        for (filepath in fileList) {
+            val file = File(filepath)
+            Log.i(TAG, "file : ${file}")
+            sb.append(
+                "<tr><td><a href=\"/photo?file=${file.name}\">${file.name}</a></td><td>${file.length()}</td><td>>${Date(
+                    file.lastModified()
+                )}</td></tr>\n"
+            )
+        }
+        val html = readTextContentFromAssets(assets, filePath = "web/photo_list.htm")
+            .replace("#PHOTO_LIST_HTML#", sb.toString())
+        newFixedLengthResponse(html)
     }
 
-    private fun readTextContentFromAssets(assets: AssetManager, filePath: String): Response {
+    private val routeMap = mapOf(
+        "GET::/photo" to showPhotoLambda,
+        "GET::/shot" to shotLambda,
+        "GET::/photos" to listPhotoLambda
+    )
+
+    private fun readTextContentFromAssets(assets: AssetManager, filePath: String): String {
         var filePathInAsset = filePath
-        if(filePathInAsset.startsWith("/")){
+        if (filePathInAsset.startsWith("/")) {
             filePathInAsset = filePathInAsset.substring(1)
         }
-        Log.d(TAG, "readTextContentFromAssets. $filePath -> $filePathInAsset")
+        Log.d(TAG, "readTextContentFromAssetsAsResponse. $filePath -> $filePathInAsset")
         val sb = StringBuffer()
         var reader: BufferedReader? = null
         try {
@@ -61,7 +91,7 @@ constructor(mainActivity: MainActivity) : NanoHTTPD(PORT) {
                 InputStreamReader(assets.open(filePathInAsset), "UTF-8")
             )
             var mLine = reader.readLine()
-            Log.d(TAG, mLine)
+            //Log.d(TAG, mLine)
             while (mLine != null) {
                 Log.d(TAG, mLine)
                 sb.append(mLine)
@@ -69,7 +99,7 @@ constructor(mainActivity: MainActivity) : NanoHTTPD(PORT) {
             }
         } catch (e: IOException) {
             Log.e(TAG, e.message)
-            return newFixedLengthResponse(Status.NOT_FOUND, "text/html", "File Not Found : $filePath")
+            throw IllegalArgumentException("File Not Found : $filePath")
         } finally {
             if (reader != null) {
                 try {
@@ -79,19 +109,18 @@ constructor(mainActivity: MainActivity) : NanoHTTPD(PORT) {
                 }
             }
         }
-        return newFixedLengthResponse(sb.toString())
+        return sb.toString()
     }
 
-    private val routeMap = mapOf(
-        "GET::/image" to imageLambda,
-        "GET::/shot" to shotLambda,
-        "GET::/stoppreview" to stopPreviewLambda
-    )
-
-    init {
-        start()
-        Log.i(TAG, "\nRunning! Visit home page to http://${Utils.getIPAddress()}:$PORT/ \n")
+    //
+    private fun readTextContentFromAssetsAsResponse(assets: AssetManager, filePath: String): Response {
+        try {
+            return newFixedLengthResponse(readTextContentFromAssets(assets, filePath))
+        } catch (e: IllegalArgumentException) {
+            return newFixedLengthResponse(Status.NOT_FOUND, "text/html", e.message)
+        }
     }
+
 
     public override fun serve(session: IHTTPSession): Response {
         var uri = Uri.parse(session.uri)
@@ -122,9 +151,15 @@ constructor(mainActivity: MainActivity) : NanoHTTPD(PORT) {
 
     private fun showImage(filePath: String): Response {
         Log.i(TAG, "image file Path =[$filePath]")
+        val folder = mMainActivity.cameraFragment.getPhotoFolder()
+        var realFilePath = filePath
+        if (!realFilePath.startsWith(folder.absolutePath)) {
+            realFilePath = "${folder}/${filePath}"
+        }
+        Log.i(TAG, realFilePath)
         var fis: FileInputStream? = null
         try {
-            val file = File(filePath)
+            val file = File(realFilePath)
             fis = FileInputStream(file)
         } catch (e: FileNotFoundException) {
             e.printStackTrace()

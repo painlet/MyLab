@@ -141,13 +141,14 @@ class CameraFragment : Fragment() {
         }
     }
 
+    fun getPhotoList() : Array<String>{
+        val mediaStorageDir = getPhotoFolder()
+        return mediaStorageDir.list()
+    }
+
     /** Create a File for saving an image or video  */
     private fun getOutputMediaFile(type: Int): File? {
-        val mediaStorageDir = File(
-            Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_PICTURES
-            ), SUB_FOLDER_NAME
-        )
+        val mediaStorageDir = getPhotoFolder()
         // This location works best if you want the created images to be shared
         // between applications and persist after your app has been uninstalled.
 
@@ -167,6 +168,15 @@ class CameraFragment : Fragment() {
                     "IMG_" + timeStamp + ".jpg"
         )
         return mediaFile
+    }
+
+    fun getPhotoFolder(): File {
+        val mediaStorageDir = File(
+            Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_PICTURES
+            ), SUB_FOLDER_NAME
+        )
+        return mediaStorageDir
     }
 
     /** Check if this device has a camera  */
